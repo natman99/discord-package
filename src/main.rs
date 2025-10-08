@@ -28,6 +28,9 @@ struct MyEguiApp {
     display: Vec<SortedWord>,
     only_text: bool,
     search: String,
+    processed_word_count: usize,
+    proessed_messages_count: usize,
+    shown_words_count: usize
 }
 
 impl MyEguiApp {
@@ -40,8 +43,11 @@ impl MyEguiApp {
         let m = read_messages();
         let end = time.elapsed().as_millis();
         println!("Processed {} messages in {} miliseconds", m.len(), end);
+        let proessed_messages_count = m.len();
         let counted_words = count_words(&m);
+        let processed_word_count = counted_words.len();
         let display = counted_words.clone();
+        let shown_words_count = display.len();
         println!("Displaying {} rows", counted_words.len());
         Self {
             messages: m,
@@ -49,15 +55,23 @@ impl MyEguiApp {
             display,
             search: String::new(),
             only_text: false,
+            processed_word_count,
+            shown_words_count,
+            proessed_messages_count,
         }
         // Self::default()
     }
 }
 
 impl eframe::App for MyEguiApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Discord messages!");
+            ui.horizontal(|ui| {
+                ui.label(format!("Processed messages: {}", self.proessed_messages_count));
+                ui.label(format!("Processed words: {}", self.processed_word_count));
+                ui.label(format!("Shown words: {}", self.display.iter().count()));
+            });
             ui.horizontal(|ui| {
                 ui.label("Search:");
                 let search_box = ui.text_edit_singleline(&mut self.search);
@@ -196,7 +210,8 @@ struct SortedWord {
 fn count_words(v: &[Message]) -> Vec<SortedWord> {
     let hash = Arc::new(Mutex::new(HashMap::<String, u64>::new()));
     v.iter().for_each(|f| {
-        let words = f.contents.trim().split(" ").into_iter();
+        let temp = f.contents.trim().replace("\n", " ");
+        let words = temp.split(" ").into_iter();
         words.for_each(|word| {
             let word = word.trim().to_lowercase();
             let mut hash = hash.lock().unwrap();
