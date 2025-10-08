@@ -30,7 +30,7 @@ struct MyEguiApp {
     search: String,
     processed_word_count: usize,
     proessed_messages_count: usize,
-    shown_words_count: usize
+    shown_words_count: usize,
 }
 
 impl MyEguiApp {
@@ -44,21 +44,26 @@ impl MyEguiApp {
         let end = time.elapsed().as_millis();
         println!("Processed {} messages in {} miliseconds", m.len(), end);
         let proessed_messages_count = m.len();
-        let counted_words = count_words(&m);
+        let counted_words: Vec<SortedWord> = count_words(&m);
         let processed_word_count = counted_words.len();
-        let display = counted_words.clone();
-        let shown_words_count = display.len();
+        
         println!("Displaying {} rows", counted_words.len());
-        Self {
-            messages: m,
+        let mut s: MyEguiApp = Self {
             counted_words,
-            display,
+            messages: m,
+            display: Vec::new(),
             search: String::new(),
             only_text: false,
             processed_word_count,
-            shown_words_count,
+            shown_words_count: 0,
             proessed_messages_count,
-        }
+        };
+        
+        let display: Vec<SortedWord> = s.counted_words.iter().map(|f| f.clone()).collect();
+        let shown_words_count = display.len();
+        s.display = display;
+        s.shown_words_count = shown_words_count;
+        s
         // Self::default()
     }
 }
@@ -68,7 +73,10 @@ impl eframe::App for MyEguiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Discord messages!");
             ui.horizontal(|ui| {
-                ui.label(format!("Processed messages: {}", self.proessed_messages_count));
+                ui.label(format!(
+                    "Processed messages: {}",
+                    self.proessed_messages_count
+                ));
                 ui.label(format!("Processed words: {}", self.processed_word_count));
                 ui.label(format!("Shown words: {}", self.display.iter().count()));
             });
@@ -78,26 +86,21 @@ impl eframe::App for MyEguiApp {
                 let only_text_check = ui.checkbox(&mut self.only_text, "Only allow alphanumeric");
                 if search_box.changed() || only_text_check.changed() {
                     if self.search.trim().is_empty() {
-                        self.display = self
+                    let all = self
                             .counted_words
                             .iter()
                             .filter(|f| {
                                 if self.only_text == true {
-                                    &f.only_text == &self.only_text
+                                    f.only_text == self.only_text
                                 } else {
                                     true
                                 }
                             })
                             .map(|f| f.clone())
                             .collect();
+                        self.display = all;
                     } else {
-                        let d = self
-                            .counted_words
-                            .iter()
-                            .filter(|f| f.word.chars().filter(|f|f.is_alphanumeric()).collect::<String>().contains(&self.search.trim()));
-                        let mut o: Vec<SortedWord> = vec![];
-                        d.for_each(|f| o.push(f.clone()));
-                        self.display = o
+                        self.display = search_text(&self.counted_words, &self.search)
                             .iter()
                             .filter(|f| {
                                 if self.only_text == true {
@@ -106,7 +109,8 @@ impl eframe::App for MyEguiApp {
                                     true
                                 }
                             })
-                            .map(|f| f.clone())
+                            .map(|f| *f)
+                            .map(|f|f.clone())
                             .collect();
                     }
                 }
@@ -208,13 +212,12 @@ struct SortedWord {
 }
 
 fn count_words(v: &[Message]) -> Vec<SortedWord> {
-    let hash = Arc::new(Mutex::new(HashMap::<String, u64>::new()));
+    let mut hash = HashMap::<String, u64>::new();
     v.iter().for_each(|f| {
         let temp = f.contents.trim().replace("\n", " ");
         let words = temp.split(" ").into_iter();
         words.for_each(|word| {
             let word = word.trim().to_lowercase();
-            let mut hash = hash.lock().unwrap();
             if let Some(key) = hash.get(&word).copied() {
                 hash.insert(word.to_string(), key + 1);
             } else {
@@ -222,11 +225,9 @@ fn count_words(v: &[Message]) -> Vec<SortedWord> {
             };
         });
     });
-    let mut h = hash.lock().unwrap();
-    println!("Found {} individual words", h.len());
-    let hashes = h.drain();
+    println!("Found {} individual words", hash.len());
     let mut v = vec![];
-    for (word, frequency) in hashes {
+    for (word, frequency) in hash.drain() {
         let only_text = word.chars().all(|f| f.is_alphanumeric());
         v.push(SortedWord {
             word,
@@ -241,4 +242,25 @@ fn count_words(v: &[Message]) -> Vec<SortedWord> {
 fn test_text(word: &str) -> bool {
     let only_text = word.chars().all(|f| f.is_alphanumeric());
     only_text
+}
+
+fn search_text<'a>(v: &'a Vec<SortedWord>, search_term: &str) -> Vec<&'a SortedWord> {
+    let mut o: Vec<&'a SortedWord> = Vec::new();
+    if test_text(search_term) {
+        // ignore special characters search
+        let d = v.iter().filter(|f| {
+            f.word
+                .chars()
+                .filter(|f| f.is_alphanumeric())
+                .collect::<String>()
+                .contains(search_term.trim())
+        });
+        d.for_each(|f| o.push(f));
+    } else {
+        // exact search
+        let d = v.iter().filter(|f|f.word.contains(search_term));
+        d.for_each(|f|o.push(&f));
+    }
+
+    o
 }
