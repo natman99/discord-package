@@ -1,15 +1,11 @@
 use eframe::egui;
-use egui::ScrollArea;
+use egui::{ScrollArea, Ui};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::*;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::hash_map::HashMap;
-use std::f32;
-use std::fs::{self, Metadata};
-use std::io::{self, read_to_string};
-use std::ops::Range;
+use std::fs;
 use std::sync::{Arc, Mutex};
 fn main() {
     let native_options = eframe::NativeOptions::default();
@@ -26,15 +22,24 @@ struct MyEguiApp {
     messages: Vec<Message>,
     counted_words: Vec<SortedWord>,
     display: Vec<SortedWord>,
+    display_sentence: Vec<Message>,
     only_text: bool,
     search: String,
     processed_word_count: usize,
     proessed_messages_count: usize,
     shown_words_count: usize,
+    state: State,
+    prev_search_len: usize,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum State{
+    Sentence,
+    #[default]
+    Word,
 }
 
 impl MyEguiApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
@@ -46,7 +51,7 @@ impl MyEguiApp {
         let proessed_messages_count = m.len();
         let counted_words: Vec<SortedWord> = count_words(&m);
         let processed_word_count = counted_words.len();
-        
+        let display_sentence = m.clone();
         println!("Displaying {} rows", counted_words.len());
         let mut s: MyEguiApp = Self {
             counted_words,
@@ -57,6 +62,9 @@ impl MyEguiApp {
             processed_word_count,
             shown_words_count: 0,
             proessed_messages_count,
+            state: Default::default(),
+            display_sentence,
+            prev_search_len: 0
         };
         
         let display: Vec<SortedWord> = s.counted_words.iter().map(|f| f.clone()).collect();
@@ -78,61 +86,18 @@ impl eframe::App for MyEguiApp {
                     self.proessed_messages_count
                 ));
                 ui.label(format!("Processed words: {}", self.processed_word_count));
-                ui.label(format!("Shown words: {}", self.display.iter().count()));
             });
-            ui.horizontal(|ui| {
-                ui.label("Search:");
-                let search_box = ui.text_edit_singleline(&mut self.search);
-                let only_text_check = ui.checkbox(&mut self.only_text, "Only allow alphanumeric");
-                if search_box.changed() || only_text_check.changed() {
-                    if self.search.trim().is_empty() {
-                    let all = self
-                            .counted_words
-                            .iter()
-                            .filter(|f| {
-                                if self.only_text == true {
-                                    f.only_text == self.only_text
-                                } else {
-                                    true
-                                }
-                            })
-                            .map(|f| f.clone())
-                            .collect();
-                        self.display = all;
-                    } else {
-                        self.display = search_text(&self.counted_words, &self.search)
-                            .iter()
-                            .filter(|f| {
-                                if self.only_text == true {
-                                    &f.only_text == &self.only_text
-                                } else {
-                                    true
-                                }
-                            })
-                            .map(|f| *f)
-                            .map(|f|f.clone())
-                            .collect();
-                    }
-                }
-            });
-            let text_style = egui::TextStyle::Body;
-            let row_height = ui.text_style_height(&text_style);
-            ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .max_height(ui.available_height())
-                .show_rows(ui, row_height, self.display.len(), |ui, row_range| {
-                    ui.set_min_height(ui.available_height());
 
-                    for row in row_range {
-                        let f = &self.display[row];
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}", f.word));
-                            ui.separator();
-                            ui.label(format!("{}", f.frequency));
-                        });
-                        ui.separator();
-                    }
-                })
+            match self.state {
+                State::Word => {
+                    word_search_bar( self, ui);
+                },
+                State::Sentence => {
+                    sentence_search(self, ui);
+                }
+            }
+
+            
         });
     }
 }
@@ -263,4 +228,134 @@ fn search_text<'a>(v: &'a Vec<SortedWord>, search_term: &str) -> Vec<&'a SortedW
     }
 
     o
+
+}
+
+
+
+fn word_search_bar(app: &mut MyEguiApp, ui: &mut Ui) {
+    ui.label(format!("Shown words: {}", app.display.iter().count()));
+
+    ui.horizontal(|ui| {
+                ui.label("Search:");
+                let search_box = ui.text_edit_singleline(&mut app.search);
+                let only_text_check = ui.checkbox(&mut app.only_text, "Only allow alphanumeric");
+                if search_box.changed() || only_text_check.changed() {
+                    if app.search.trim().is_empty() {
+                    let all = app
+                            .counted_words
+                            .iter()
+                            .filter(|f| {
+                                if app.only_text == true {
+                                    f.only_text == app.only_text
+                                } else {
+                                    true
+                                }
+                            })
+                            .map(|f| f.clone())
+                            .collect();
+                        app.display = all;
+                    } else {
+                        app.display = search_text(&app.counted_words, &app.search)
+                            .iter()
+                            .filter(|f| {
+                                if app.only_text == true {
+                                    &f.only_text == &app.only_text
+                                } else {
+                                    true
+                                }
+                            })
+                            .map(|f| *f)
+                            .map(|f|f.clone())
+                            .collect();
+                    }
+                }
+            });
+            let text_style = egui::TextStyle::Body;
+            let row_height = ui.text_style_height(&text_style);
+            ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .max_height(ui.available_height())
+                .show_rows(ui, row_height, app.display.len(), |ui, row_range| {
+                    ui.set_min_height(ui.available_height());
+
+                    for row in row_range {
+                        let f = &app.display[row];
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}", f.word));
+                            ui.separator();
+                            ui.label(format!("{}", f.frequency));
+                        });
+                        ui.separator();
+                    }
+                });
+}
+
+fn sentence_search(app: &mut MyEguiApp, ui: &mut Ui) {
+    ui.label(format!("Shown messages: {}", app.display_sentence.iter().count()));
+
+    ui.horizontal(|ui| {
+                ui.label("Search:");
+                let search_box = ui.text_edit_singleline(&mut app.search);
+                if search_box.changed() {
+                    if app.search.trim().is_empty() {
+                    let all = app.messages.clone();
+                        app.display_sentence = all;
+                    } else {
+                        let search_me: &Vec<Message>;
+                        if app.search.len() > app.prev_search_len {
+                            search_me = &app.display_sentence
+                        } else {
+                            search_me = &app.messages
+                        }
+                        app.prev_search_len = app.search.len();
+
+                        app.display_sentence = search_sentnece(&search_me, &app.search)
+                            .iter()
+    
+                            .map(|f| *f)
+                            .map(|f|f.clone())
+                            .collect();
+                    }
+                }
+            });
+            let text_style = egui::TextStyle::Body;
+            let row_height = ui.text_style_height(&text_style);
+            ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .max_height(ui.available_height())
+                .show_rows(ui, row_height, app.display_sentence.len(), |ui, row_range| {
+                    ui.set_min_height(ui.available_height());
+
+                    for row in row_range {
+                        let f = &app.display_sentence[row];
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}", f.contents));
+                            ui.separator();
+                        });
+                        ui.separator();
+                    }
+                });
+}
+
+fn search_sentnece<'a>(v: &'a Vec<Message>, search_term: &str) -> Vec<&'a Message> {
+    let mut o: Vec<&'a Message> = Vec::new();
+    if test_text(search_term) {
+        // ignore special characters search
+        let d = v.iter().filter(|f| {
+            f.contents
+                .chars()
+                .filter(|f| f.is_alphanumeric())
+                .collect::<String>()
+                .to_lowercase()
+                .contains(&search_term.trim().to_lowercase())
+        });
+        d.for_each(|f| o.push(f));
+    } else {
+        // exact search
+        let d = v.iter().filter(|f|f.contents.to_lowercase().contains(&search_term.to_lowercase()));
+        d.for_each(|f|o.push(&f));
+    }
+    o
+
 }
