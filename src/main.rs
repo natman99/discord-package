@@ -1,4 +1,5 @@
 use eframe::egui;
+use egui::text::LayoutJob;
 use egui::{ScrollArea, Ui};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::*;
@@ -80,6 +81,21 @@ impl eframe::App for MyEguiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Discord messages!");
+            let mut changed = false;
+            let mut state_changed = false;
+
+            ui.horizontal(|ui| {
+                if ui.button("Word").clicked() {
+                    self.state = State::Word;
+                    state_changed = true
+                }
+
+                if ui.button("Sentence").clicked() {
+                    self.state = State::Sentence;
+                    state_changed = true
+                }
+            });
+
             ui.horizontal(|ui| {
                 ui.label(format!(
                     "Processed messages: {}",
@@ -88,12 +104,19 @@ impl eframe::App for MyEguiApp {
                 ui.label(format!("Processed words: {}", self.processed_word_count));
             });
 
+            ui.label("Search:");
+            let search_box = ui.text_edit_singleline(&mut self.search);
+            changed = search_box.changed();
+            if state_changed {
+                changed = true
+            }
+
             match self.state {
                 State::Word => {
-                    word_search_bar( self, ui);
+                    word_search_bar( self, ui, changed);
                 },
                 State::Sentence => {
-                    sentence_search(self, ui);
+                    sentence_search(self, ui, changed);
                 }
             }
 
@@ -233,14 +256,12 @@ fn search_text<'a>(v: &'a Vec<SortedWord>, search_term: &str) -> Vec<&'a SortedW
 
 
 
-fn word_search_bar(app: &mut MyEguiApp, ui: &mut Ui) {
+fn word_search_bar(app: &mut MyEguiApp, ui: &mut Ui, changed: bool) {
     ui.label(format!("Shown words: {}", app.display.iter().count()));
 
     ui.horizontal(|ui| {
-                ui.label("Search:");
-                let search_box = ui.text_edit_singleline(&mut app.search);
                 let only_text_check = ui.checkbox(&mut app.only_text, "Only allow alphanumeric");
-                if search_box.changed() || only_text_check.changed() {
+                if changed || only_text_check.changed() {
                     if app.search.trim().is_empty() {
                     let all = app
                             .counted_words
@@ -291,13 +312,12 @@ fn word_search_bar(app: &mut MyEguiApp, ui: &mut Ui) {
                 });
 }
 
-fn sentence_search(app: &mut MyEguiApp, ui: &mut Ui) {
+fn sentence_search(app: &mut MyEguiApp, ui: &mut Ui, changed: bool) {
     ui.label(format!("Shown messages: {}", app.display_sentence.iter().count()));
 
     ui.horizontal(|ui| {
-                ui.label("Search:");
-                let search_box = ui.text_edit_singleline(&mut app.search);
-                if search_box.changed() {
+                
+                if changed {
                     if app.search.trim().is_empty() {
                     let all = app.messages.clone();
                         app.display_sentence = all;
@@ -330,6 +350,14 @@ fn sentence_search(app: &mut MyEguiApp, ui: &mut Ui) {
                     for row in row_range {
                         let f = &app.display_sentence[row];
                         ui.horizontal(|ui| {
+                            let text = egui::text::TextWrapping {
+                                max_width: ui.available_width(),
+                                max_rows: 4,
+                                break_anywhere: true,
+                                overflow_character: None,
+                            };
+
+
                             ui.label(format!("{}", f.contents));
                             ui.separator();
                         });
